@@ -3,9 +3,14 @@ import uuid
 import numpy as np
 import cv2
 import math
+# from keras import Sequential, Dense, InputLayer
+from keras.models import Sequential
+from keras.layers import Dense, InputLayer
 
 from hlt.positionals import Position
 from hlt.entity import Shipyard
+
+
 
 class Brain:
 
@@ -15,7 +20,67 @@ class Brain:
     ENEMY_SHIP_COLOR = (0,0,255)
     HARLITE_BASE = (255,0,0)
 
-    def __init__(self, game, headless=False):
+    def __init__(self, game, headless=True):
+        self.network = QNetwork()
+        self.observer = Observer(game, headless)
+
+
+        self.actions = []
+        self.reward_map = {
+
+        }
+
+    def choose(self, game):
+        self.observer.new_observation()
+        self.observer.draw(game)
+
+        state = self.observer.show()
+
+
+
+
+class QNetwork:
+    def __init__(self, state):
+        self.model = Sequential()
+        self.model.add(InputLayer(batch_input_shape=(1, 5)))
+        self.model.add(Dense(10, activation='sigmoid'))
+        self.model.add(Dense(2, activation='linear'))
+        self.model.compile(loss='mse', optimizer='adam', metrics=['mae'])
+
+        self.s = state
+        self.y = 0
+        self.eps = 0.5
+        self.decay_factor = 0.999
+
+    def predict(self, r, new_s, actions):
+        self.eps *= self.decay_factor
+
+        a = self.select_action(actions)
+        self.learn(r, a, new_s)
+
+        self.s = new_s
+
+    def select_action(self, actions):
+
+        if np.random.random() < self.eps:
+            a = np.random.randint(0, 2)
+        else:
+            a = np.argmax(self._predict(self.s))
+
+        return a
+
+    def learn(self, r, a, new_s):
+        target = r + self.y * np.max(self._predict(new_s))
+        target_vec = self._predict(self.s)[0]
+        target_vec[a] = target
+
+        self.model.fit(np.identity(5)[s:s + 1], target_vec.reshape(-1, 2), epochs=1, verbose=0)
+
+    def _predict(self, s):
+        return self.model.predict(np.identity(5)[s:s + 1])
+
+class Observer:
+    def __init__(self, game, headless=True):
         self.id = uuid.uuid4()
         self.headless = headless
         self.map_ration = 8
@@ -25,6 +90,10 @@ class Brain:
         self.observations = []
         self.map = []
         self.time = str(int(time.time()))
+        self.map_width = 0
+        self.map_height = 0
+        self.map_ratio_to_view = 0
+
 
     def init_map(self, game):
         self.map_width = game.game_map.width
@@ -57,7 +126,7 @@ class Brain:
                 self._draw_rectangle(map_x, map_y, (0, 0, 0))
 
                 cell = game.game_map[Position(x, y)]
-                self._draw_harlite(game, cell, map_x, map_y)
+                self._draw_halite(game, cell, map_x, map_y)
 
                 self._draw_ship(game, cell, map_x, map_y)
 
@@ -65,7 +134,7 @@ class Brain:
                     structure = cell.structure
                     self._draw_shipyard(game, structure, map_x, map_y)
 
-    def _draw_harlite(self, game, cell, map_x, map_y):
+    def _draw_halite(self, game, cell, map_x, map_y):
         halite_amount = cell.halite_amount
         halite_percentage = halite_amount / self.biggest_field
         color_value = 255 * halite_percentage
@@ -87,10 +156,6 @@ class Brain:
 
     def _draw_rectangle(self, map_x, map_y, color):
         cv2.rectangle(self.map, (map_x, map_y), (map_x + self.map_ration * self.map_ratio_to_view, map_y + self.map_ration * self.map_ratio_to_view), color, -1)
-
-    def choose(self, game):
-        self.new_observation()
-        pass
 
     def new_observation(self):
         if len(self.map):
@@ -122,3 +187,4 @@ class Brain:
             cv2.imshow("Intel - Harlite - {}".format(self.id), resized)
             cv2.waitKey(1)
 
+        return self.map

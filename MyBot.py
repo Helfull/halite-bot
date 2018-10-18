@@ -56,5 +56,3 @@ while True:
     # Send your moves back to the game environment, ending this turn.
     brain.choose(game)
     game.end_turn(command_queue)
-    brain.draw(game)
-    brain.show()
