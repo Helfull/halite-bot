@@ -1,4 +1,5 @@
 import abc
+import logging
 
 from . import commands, constants
 from .positionals import Direction, Position
@@ -16,6 +17,15 @@ class Entity(abc.ABC):
 
     def is_owner(self, player):
         return self.owner == player.id
+
+    @property
+    def harlite_amount(self):
+        try:
+            return self._halite_amount
+        except Exception as e:
+            logging.debug(e)
+            return 0
+    
 
     @staticmethod
     def _generate(player_id):
@@ -55,7 +65,7 @@ class Ship(Entity):
     """
     def __init__(self, owner, id, position, halite_amount):
         super().__init__(owner, id, position)
-        self.halite_amount = halite_amount
+        self._halite_amount = halite_amount
 
     @property
     def is_full(self):

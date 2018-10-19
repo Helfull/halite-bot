@@ -30,7 +30,7 @@ class Network:
         if np.random.random() < self.eps:
             a = np.random.randint(0, len(actions)-1)
         else:
-            a = np.argmax(self._predict(secondary, state))
+            a = np.argmax(self._predict(np.array(secondary), state))
 
         return a
 
