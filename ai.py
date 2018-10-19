@@ -3,16 +3,62 @@ import uuid
 import numpy as np
 import cv2
 import math
-# from keras import Sequential, Dense, InputLayer
-from keras.models import Sequential
-from keras.layers import Dense, InputLayer
+import logging
 
 from hlt.positionals import Position
 from hlt.entity import Shipyard
 
+from QNetwork import Network
 
 
 class Brain:
+
+    def __init__(self, game, headless=True):
+        if headless:
+            logging.info("Running in headless mode")
+
+        self.actions = [
+            'self.build_ship',
+            'self.move_south',
+            'self.move_west',
+            'self.move_north',
+            'self.move_east',
+            'self.collect'
+        ]
+
+        self.network = Network(headless, len(self.actions))
+        self.observer = Observer(game, headless)
+
+        self.reward_map = {
+
+        }
+
+        self.network.draw()
+
+    def choose(self, game):
+        self.observer.new_observation()
+        self.observer.draw(game)
+
+        # You extract player metadata and the updated map metadata here for convenience.
+        me = game.me
+        game_map = game.game_map
+
+        state = self.observer.show()
+
+
+        for ship in me.get_ships():
+            a = self.network.select_action(np.array([
+                    ship.position.x,
+                    ship.position.y
+                ]), 
+                state, 
+                self.actions
+            )
+            logging.debug(self.actions[a])
+
+
+
+class Observer:
 
     SHIPYARD_COLOR = (0,128,0)
     ENEMY_SHIPYARD_COLOR = (0,0,128)
@@ -21,84 +67,22 @@ class Brain:
     HARLITE_BASE = (255,0,0)
 
     def __init__(self, game, headless=True):
-        self.network = QNetwork()
-        self.observer = Observer(game, headless)
-
-
-        self.actions = []
-        self.reward_map = {
-
-        }
-
-    def choose(self, game):
-        self.observer.new_observation()
-        self.observer.draw(game)
-
-        state = self.observer.show()
-
-
-
-
-class QNetwork:
-    def __init__(self, state):
-        self.model = Sequential()
-        self.model.add(InputLayer(batch_input_shape=(1, 5)))
-        self.model.add(Dense(10, activation='sigmoid'))
-        self.model.add(Dense(2, activation='linear'))
-        self.model.compile(loss='mse', optimizer='adam', metrics=['mae'])
-
-        self.s = state
-        self.y = 0
-        self.eps = 0.5
-        self.decay_factor = 0.999
-
-    def predict(self, r, new_s, actions):
-        self.eps *= self.decay_factor
-
-        a = self.select_action(actions)
-        self.learn(r, a, new_s)
-
-        self.s = new_s
-
-    def select_action(self, actions):
-
-        if np.random.random() < self.eps:
-            a = np.random.randint(0, 2)
-        else:
-            a = np.argmax(self._predict(self.s))
-
-        return a
-
-    def learn(self, r, a, new_s):
-        target = r + self.y * np.max(self._predict(new_s))
-        target_vec = self._predict(self.s)[0]
-        target_vec[a] = target
-
-        self.model.fit(np.identity(5)[s:s + 1], target_vec.reshape(-1, 2), epochs=1, verbose=0)
-
-    def _predict(self, s):
-        return self.model.predict(np.identity(5)[s:s + 1])
-
-class Observer:
-    def __init__(self, game, headless=True):
         self.id = uuid.uuid4()
         self.headless = headless
         self.map_ration = 8
-        self.view_size = self.map_ration * 15
-        self.init_map(game)
+        self.map_width = 0
+        self.map_height = 0
         self.storage = "train_data_intel"
         self.observations = []
         self.map = []
         self.time = str(int(time.time()))
-        self.map_width = 0
-        self.map_height = 0
-        self.map_ratio_to_view = 0
+        self.init_map(game.game_map)
 
 
-    def init_map(self, game):
-        self.map_width = game.game_map.width
-        self.map_height = game.game_map.height
-        self.map_ratio_to_view = math.ceil(self.view_size / game.game_map.width)
+    def init_map(self, game_map):
+        logging.debug("Setting up map: {}x{}".format(game_map.width, game_map.height))
+        self.map_width = game_map.width
+        self.map_height = game_map.height
 
 
     @staticmethod
@@ -120,9 +104,9 @@ class Observer:
         self.biggest_field, _, _ = self.locateLargest(game.game_map._cells)
 
         for x in range(0, self.map_width):
-            map_x = x * self.map_ratio_to_view
+            map_x = x
             for y in range(0, self.map_height):
-                map_y = y * self.map_ratio_to_view
+                map_y = y
                 self._draw_rectangle(map_x, map_y, (0, 0, 0))
 
                 cell = game.game_map[Position(x, y)]
@@ -155,35 +139,21 @@ class Observer:
                 self._draw_rectangle(map_x, map_y, self.ENEMY_SHIPYARD_COLOR)
 
     def _draw_rectangle(self, map_x, map_y, color):
-        cv2.rectangle(self.map, (map_x, map_y), (map_x + self.map_ration * self.map_ratio_to_view, map_y + self.map_ration * self.map_ratio_to_view), color, -1)
+        cv2.rectangle(self.map, (map_x, map_y), (map_x + self.map_ration, map_y + self.map_ration), color, -1)
 
     def new_observation(self):
-        if len(self.map):
-            self.observations.append([[], self.map])
-
-        if len(self.observations) % 10 == 0:
-            self.store()
-
         self.map = np.zeros(
             (
-                self.view_size,
-                self.view_size,
+                self.map_width,
+                self.map_height,
                 3
             ),
             np.uint8
         )
 
-    def store(self):
-        storeTo = "{}/{}-{}.npy".format(
-            self.storage,
-            self.time,
-            self.id
-        )
-        np.save(storeTo, np.array(self.observations))
-
     def show(self):
         if not self.headless:
-            resized = cv2.resize(self.map, dsize=None, fx=2, fy=2)
+            resized = cv2.resize(self.map, dsize=None, fx=10, fy=10)
             cv2.imshow("Intel - Harlite - {}".format(self.id), resized)
             cv2.waitKey(1)
 
